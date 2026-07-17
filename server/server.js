@@ -15,10 +15,13 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // 3. Configure global middlewares
-app.use(cors({
-  origin: process.env.CLIENT_URL || '*',
-  methods: ['GET', 'POST'],
-}));
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || '*',
+    methods: ['GET', 'POST'],
+  })
+);
+
 app.use(express.json());
 
 // 4. API Routes
