@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useSocket } from '../context/SocketContext';
 import styles from './Sidebar.module.css';
 
-const DEFAULT_ROOMS = ['general', 'development', 'random', 'gaming', 'memes'];
+const DEFAULT_ROOMS = ['general', 'development', 'media', 'research-and-marketing', 'random'];
 const ROOM_NAME_REGEX = /^[a-zA-Z0-9\-_]+$/;
 
 export const Sidebar = ({ onClose }) => {
