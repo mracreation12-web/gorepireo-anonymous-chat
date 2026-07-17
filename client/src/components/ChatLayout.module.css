@@ -1,0 +1,85 @@
+.layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  background-color: var(--bg-primary);
+  overflow: hidden;
+}
+
+.mainArea {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Mobile Sidebar Drawer Overlay styles */
+.sidebarOverlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.mobileSidebarContainer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 101;
+  transform: translateX(-100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mobileSidebarOpen {
+  transform: translateX(0);
+}
+
+@media (max-width: 768px) {
+  .desktopSidebar {
+    display: none;
+  }
+  .sidebarOverlayActive {
+    display: block;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.connectionBanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background-color: rgba(239, 68, 68, 0.08);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.15);
+  color: var(--error);
+  font-size: 0.8rem;
+  padding: 8px 16px;
+  font-weight: 500;
+  animation: fadeIn 0.2s ease-out;
+  width: 100%;
+}
+
+.pulseDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--error);
+  animation: pulseDotAnim 1s infinite alternate;
+}
+
+@keyframes pulseDotAnim {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+

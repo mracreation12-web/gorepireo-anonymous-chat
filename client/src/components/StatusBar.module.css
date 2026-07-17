@@ -1,0 +1,56 @@
+.statusBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  background-color: var(--bg-primary);
+  border-top: 1px solid var(--border);
+  padding: 0 16px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.left, .right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: var(--transition);
+}
+
+.connected {
+  background-color: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+
+.connecting {
+  background-color: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pulse 1s infinite alternate;
+}
+
+.disconnected, .error {
+  background-color: var(--error);
+  box-shadow: 0 0 6px var(--error);
+}
+
+.typingArea {
+  color: var(--text-muted);
+  font-style: italic;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes pulse {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
