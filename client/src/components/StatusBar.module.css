@@ -54,3 +54,23 @@
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+@media (max-width: 768px) {
+  .statusBar {
+    height: calc(28px + env(safe-area-inset-bottom));
+    padding: 0 12px env(safe-area-inset-bottom);
+  }
+  .left, .right {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 360px) {
+  .statusBar {
+    font-size: 0.68rem;
+    padding: 0 6px env(safe-area-inset-bottom);
+  }
+  .left, .right {
+    gap: 4px;
+  }
+}

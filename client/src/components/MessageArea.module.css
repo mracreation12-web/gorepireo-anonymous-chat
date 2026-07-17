@@ -89,3 +89,18 @@
     transform: translateY(0);
   }
 }
+
+@media (max-width: 768px) {
+  .messageArea {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .messageRow {
+    max-width: 85%;
+  }
+
+  .bubble {
+    overflow-wrap: break-word;
+  }
+}

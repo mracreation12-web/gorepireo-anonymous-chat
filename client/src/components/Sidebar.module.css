@@ -150,3 +150,51 @@
   font-size: 0.7rem;
   margin-top: 4px;
 }
+
+/* ===========================
+   Mobile Responsive Sidebar
+=========================== */
+
+@media (max-width: 768px) {
+
+  .sidebar {
+    width: 280px;
+    max-width: 80vw;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .logoArea {
+    height: calc(56px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 16px 0;
+  }
+
+  .section {
+    padding: 16px 10px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .form {
+    padding: 14px 10px;
+  }
+
+  .roomBtn {
+    padding: 10px 12px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    font-size: 0.9rem;
+  }
+
+  .input {
+    min-height: 44px;
+  }
+
+  .joinBtn {
+    padding: 10px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+}

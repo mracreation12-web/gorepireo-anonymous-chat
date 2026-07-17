@@ -124,4 +124,13 @@
   transform: scale(0.98);
 }
 
+@media (max-width: 768px) {
+  .retryBtn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 
