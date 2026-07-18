@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, memo } from 'react';
+import React, { useEffect, useRef, useCallback, memo } from 'react';
 import { useSocket } from '../context/SocketContext';
 import { EmptyState } from './States';
 import styles from './MessageArea.module.css';
@@ -22,7 +22,7 @@ const MessageItem = memo(({ msg, isSelf, formatTime }) => {
 
 MessageItem.displayName = 'MessageItem';
 
-export const MessageArea = () => {
+export const MessageArea = memo(() => {
   const { messages, sessionInfo } = useSocket();
   const bottomRef = useRef(null);
   const containerRef = useRef(null);
@@ -56,14 +56,14 @@ export const MessageArea = () => {
   }, [messages]);
 
   // Clean time formatting helper
-  const formatTime = (isoString) => {
+  const formatTime = useCallback((isoString) => {
     try {
       const date = new Date(isoString);
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch (e) {
       return '';
     }
-  };
+  }, []);
 
   if (messages.length === 0) {
     return <EmptyState />;
@@ -90,6 +90,10 @@ export const MessageArea = () => {
       <div className={styles.scrollAnchor} ref={bottomRef} aria-hidden="true" />
     </div>
   );
-};
+});
+
+MessageArea.displayName = 'MessageArea';
+export default MessageArea;
+
 
 

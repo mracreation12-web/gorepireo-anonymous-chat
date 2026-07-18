@@ -1,8 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useSocket } from '../context/SocketContext';
 import styles from './MessageInput.module.css';
 
-export const MessageInput = () => {
+export const MessageInput = memo(() => {
   const { sendMessage, sendTypingStart, sendTypingStop, connectionStatus, typingUsers, sessionInfo } = useSocket();
   const [text, setText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -18,7 +18,7 @@ export const MessageInput = () => {
     };
   }, []);
 
-  const handleInputChange = (e) => {
+  const handleInputChange = useCallback((e) => {
     const val = e.target.value;
     if (val.length <= 1000) {
       setText(val);
@@ -48,10 +48,10 @@ export const MessageInput = () => {
       isTypingRef.current = false;
       sendTypingStop();
     }, 1500);
-  };
+  }, [sendTypingStart, sendTypingStop]);
 
   // Stop typing immediately when input loses focus
-  const handleBlur = () => {
+  const handleBlur = useCallback(() => {
     if (isTypingRef.current) {
       isTypingRef.current = false;
       sendTypingStop();
@@ -59,7 +59,7 @@ export const MessageInput = () => {
         clearTimeout(stopTimeoutRef.current);
       }
     }
-  };
+  }, [sendTypingStop]);
 
   const handleFormSubmit = useCallback((e) => {
     if (e) e.preventDefault();
@@ -86,13 +86,13 @@ export const MessageInput = () => {
     }
   }, [text, isDisconnected, isSubmitting, sendMessage, sendTypingStop]);
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = useCallback((e) => {
     // Send message on Enter without Shift
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleFormSubmit();
     }
-  };
+  }, [handleFormSubmit]);
 
   const getTypingText = () => {
     if (!typingUsers || typingUsers.length === 0) return '';
@@ -141,7 +141,9 @@ export const MessageInput = () => {
       </form>
     </div>
   );
-};
+});
 
+MessageInput.displayName = 'MessageInput';
 export default MessageInput;
+
 

@@ -202,6 +202,9 @@ export const handleConnection = (io, socket) => {
   // 4. DISCONNECT / LEAVE handlers
   const handleLeaveCleanup = () => {
     if (currentRoom) {
+      // Notify remaining room members that typing stopped
+      socket.to(currentRoom).emit('typing:stop', { room: currentRoom });
+      
       const leftRoom = onlineTracker.trackLeave(socket.id);
       if (leftRoom) {
         broadcastOnlineCounts(io, leftRoom);

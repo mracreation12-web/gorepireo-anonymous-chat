@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { useSocket } from '../context/SocketContext';
 import styles from './Header.module.css';
 
-export const Header = ({ onToggleMenu }) => {
+export const Header = memo(({ onToggleMenu }) => {
   const { currentRoom, sessionInfo } = useSocket();
 
   return (
@@ -27,4 +27,8 @@ export const Header = ({ onToggleMenu }) => {
       </div>
     </header>
   );
-};
+});
+
+Header.displayName = 'Header';
+export default Header;
+

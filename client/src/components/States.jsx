@@ -1,16 +1,17 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { useSocket } from '../context/SocketContext';
 import styles from './States.module.css';
 
-export const LoadingState = ({ message = 'Connecting to server...' }) => (
+export const LoadingState = memo(({ message = 'Connecting to server...' }) => (
   <div className={styles.container} role="status">
     <div className={styles.spinner}></div>
     <div className={styles.title}>Loading Chat</div>
     <p className={styles.message}>{message}</p>
   </div>
-);
+));
+LoadingState.displayName = 'LoadingState';
 
-export const ErrorState = ({ message = 'Failed to establish connection. Reconnecting...' }) => {
+export const ErrorState = memo(({ message = 'Failed to establish connection. Reconnecting...' }) => {
   const { retryConnection } = useSocket();
   return (
     <div className={styles.container} role="alert">
@@ -22,18 +23,19 @@ export const ErrorState = ({ message = 'Failed to establish connection. Reconnec
       </button>
     </div>
   );
-};
+});
+ErrorState.displayName = 'ErrorState';
 
-export const EmptyState = ({ title = 'No Messages Yet', message = 'Say hello to initiate the conversation!' }) => (
+export const EmptyState = memo(({ title = 'No Messages Yet', message = 'Say hello to initiate the conversation!' }) => (
   <div className={styles.container}>
     <span className={styles.icon} aria-hidden="true">💬</span>
     <div className={styles.title}>{title}</div>
     <p className={styles.message}>{message}</p>
   </div>
-);
+));
+EmptyState.displayName = 'EmptyState';
 
-
-export const MessageAreaSkeleton = () => (
+export const MessageAreaSkeleton = memo(() => (
   <div className={styles.skeletonContainer} aria-hidden="true">
     {[1, 2, 3, 4].map((n) => (
       <div key={n} className={styles.skeletonRow}>
@@ -45,5 +47,7 @@ export const MessageAreaSkeleton = () => (
       </div>
     ))}
   </div>
-);
+));
+MessageAreaSkeleton.displayName = 'MessageAreaSkeleton';
+
 

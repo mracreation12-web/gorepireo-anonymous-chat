@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { io } from 'socket.io-client';
 import apiService from '../services/api.js';
 
@@ -16,20 +16,39 @@ const generateMoniker = () => {
 };
 
 export const SocketProvider = ({ children }) => {
+  // State definitions
   const [socket, setSocket] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState('connecting'); // connecting, connected, disconnected, error
+  const [connectionStatus, setConnectionStatus] = useState('waking'); // waking, connecting, connected, reconnecting, disconnected, error
   const [currentRoom, setCurrentRoom] = useState('general');
   const [messages, setMessages] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
   const [onlineCounts, setOnlineCounts] = useState({ global: 0, room: 0 });
   const [sessionInfo, setSessionInfo] = useState({ sessionId: '', moniker: '' });
-  
-  // Hardened state: browser network presence and native notification toasts
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [toasts, setToasts] = useState([]);
 
-  const typingTimeouts = useRef(new Map());
+  // Mutable References to avoid stale closures in Socket event listeners
+  const socketRef = useRef(null);
+  const currentRoomRef = useRef(currentRoom);
+  const sessionInfoRef = useRef(sessionInfo);
+  const isOnlineRef = useRef(isOnline);
+  const typingTimeoutsRef = useRef(new Map());
+  const healthCheckTimerRef = useRef(null);
+  const isHealthCheckedRef = useRef(false);
   const isFirstConnectRef = useRef(true);
+
+  // Sync refs with state
+  useEffect(() => {
+    currentRoomRef.current = currentRoom;
+  }, [currentRoom]);
+
+  useEffect(() => {
+    sessionInfoRef.current = sessionInfo;
+  }, [sessionInfo]);
+
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
 
   // Toast dispatch action
   const removeToast = useCallback((id) => {
@@ -44,38 +63,15 @@ export const SocketProvider = ({ children }) => {
     }, 4000);
   }, [removeToast]);
 
-  // Track browser offline/online transitions
-  useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      addToast('Internet connection restored.', 'success');
-      // If socket is disconnected, try to re-establish connection immediately
-      if (socket) {
-        socket.connect();
-      }
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-      setConnectionStatus('disconnected');
-      addToast('You are currently offline. Check your network settings.', 'error');
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [socket, addToast]);
-
-  // Initialize session ID and Moniker from localStorage or generate new ones
+  // 1. Initialize session ID and Moniker from localStorage or generate new ones
   useEffect(() => {
     let sessionId = localStorage.getItem('chat_session_id');
     let moniker = localStorage.getItem('chat_moniker');
 
     if (!sessionId) {
-      sessionId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+      sessionId = typeof crypto !== 'undefined' && crypto.randomUUID 
+        ? crypto.randomUUID() 
+        : Math.random().toString(36).substring(2, 15);
       localStorage.setItem('chat_session_id', sessionId);
     }
     if (!moniker) {
@@ -86,175 +82,245 @@ export const SocketProvider = ({ children }) => {
     setSessionInfo({ sessionId, moniker });
   }, []);
 
-  // 1. WebSocket Connection Lifecycle Effect
-  // Runs ONLY once when sessionInfo is initialized. Prevents connection tearing on room switches.
+  // Clear typing timeouts helper
+  const clearAllTypingTimeouts = useCallback(() => {
+    typingTimeoutsRef.current.forEach((t) => clearTimeout(t));
+    typingTimeoutsRef.current.clear();
+    setTypingUsers([]);
+  }, []);
+
+  // 2. Pre-flight REST Health Polling & Socket Initialization Lifecycle
   useEffect(() => {
     if (!sessionInfo.sessionId) return;
 
-    const socketInstance = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 10000,
-      autoConnect: true,
-      timeout: 10000,
-    });
+    let isSubscribed = true;
 
-    setSocket(socketInstance);
+    // Helper: Initialize Socket.IO connection ONCE backend health is confirmed
+    const initSocketConnection = () => {
+      if (socketRef.current) return; // Prevent duplicate socket creation
 
-    return () => {
-      socketInstance.disconnect();
-    };
-  }, [sessionInfo.sessionId]);
+      setConnectionStatus('connecting');
 
-  // 2. Connection Status & Auto-rejoin Event Bindings Effect
-  // Listens to connect/disconnect states and ensures client automatically joins targetRoom on reconnect.
-  useEffect(() => {
-    if (!socket) return;
+      const socketInstance = io(SOCKET_URL, {
+        transports: ['websocket', 'polling'], // WebSocket primary, polling fallback
+        reconnection: true,
+        reconnectionAttempts: Infinity,      // Unlimited retries
+        reconnectionDelay: 1000,              // Initial backoff 1s
+        reconnectionDelayMax: 10000,          // Max backoff 10s
+        randomizationFactor: 0.5,             // Jitter to prevent reconnect storms
+        autoConnect: true,
+        timeout: 20000,
+      });
 
-    const onConnect = () => {
-      setConnectionStatus('connected');
-      if (!isFirstConnectRef.current) {
-        addToast('Reconnected to chat server.', 'success');
-      }
-      isFirstConnectRef.current = false;
-      // Automatically join the current room upon connection or reconnection
-      socket.emit('join', {
-        room: currentRoom,
-        senderSessionId: sessionInfo.sessionId,
-        moniker: sessionInfo.moniker,
+      socketRef.current = socketInstance;
+      setSocket(socketInstance);
+
+      // Register ALL socket listeners EXACTLY ONCE
+      socketInstance.on('connect', () => {
+        if (!isSubscribed) return;
+        setConnectionStatus('connected');
+        if (!isFirstConnectRef.current) {
+          addToast('Reconnected to chat server.', 'success');
+        }
+        isFirstConnectRef.current = false;
+
+        // Auto-join current room using ref
+        socketInstance.emit('join', {
+          room: currentRoomRef.current,
+          senderSessionId: sessionInfoRef.current.sessionId,
+          moniker: sessionInfoRef.current.moniker,
+        });
+      });
+
+      socketInstance.on('disconnect', (reason) => {
+        if (!isSubscribed) return;
+        setConnectionStatus('disconnected');
+        if (reason === 'io server disconnect') {
+          // Reconnect manually if server initiated disconnect
+          socketInstance.connect();
+        }
+        addToast('Connection lost. Reconnecting...', 'warning');
+      });
+
+      socketInstance.on('connect_error', () => {
+        if (!isSubscribed) return;
+        setConnectionStatus((prev) => (prev === 'waking' ? 'waking' : 'reconnecting'));
+      });
+
+      socketInstance.on('reconnect_attempt', () => {
+        if (!isSubscribed) return;
+        setConnectionStatus('reconnecting');
+      });
+
+      socketInstance.on('reconnect', () => {
+        if (!isSubscribed) return;
+        setConnectionStatus('connected');
+        // Re-join active room on reconnection
+        socketInstance.emit('join', {
+          room: currentRoomRef.current,
+          senderSessionId: sessionInfoRef.current.sessionId,
+          moniker: sessionInfoRef.current.moniker,
+        });
+      });
+
+      socketInstance.on('history', (data) => {
+        if (!isSubscribed) return;
+        if (data && data.room === currentRoomRef.current) {
+          setMessages(data.messages || []);
+        }
+      });
+
+      socketInstance.on('message', (incomingMsg) => {
+        if (!isSubscribed) return;
+        if (incomingMsg && incomingMsg.room === currentRoomRef.current) {
+          setMessages((prev) => {
+            // Deduplicate incoming message by unique Database ID (_id) or client id
+            const msgId = incomingMsg._id || incomingMsg.id;
+            if (msgId && prev.some((m) => (m._id || m.id) === msgId)) {
+              return prev;
+            }
+            return [...prev, incomingMsg];
+          });
+        }
+      });
+
+      socketInstance.on('room_count_update', (data) => {
+        if (!isSubscribed) return;
+        if (data && data.room === currentRoomRef.current) {
+          setOnlineCounts((prev) => ({ ...prev, room: data.count }));
+        }
+      });
+
+      socketInstance.on('global_count_update', (data) => {
+        if (!isSubscribed) return;
+        if (data) {
+          setOnlineCounts((prev) => ({ ...prev, global: data.count }));
+        }
+      });
+
+      socketInstance.on('typing:start', (data) => {
+        if (!isSubscribed) return;
+        if (data && data.room === currentRoomRef.current) {
+          const { moniker } = data;
+          setTypingUsers((prev) => {
+            if (prev.includes(moniker)) return prev;
+            return [...prev, moniker];
+          });
+
+          // Reset timer if user continues typing
+          if (typingTimeoutsRef.current.has(moniker)) {
+            clearTimeout(typingTimeoutsRef.current.get(moniker));
+          }
+
+          const timeout = setTimeout(() => {
+            setTypingUsers((prev) => prev.filter((u) => u !== moniker));
+            typingTimeoutsRef.current.delete(moniker);
+          }, 4000);
+
+          typingTimeoutsRef.current.set(moniker, timeout);
+        }
+      });
+
+      socketInstance.on('typing:stop', (data) => {
+        if (!isSubscribed) return;
+        if (data && data.room === currentRoomRef.current) {
+          clearAllTypingTimeouts();
+        }
       });
     };
 
-    const onDisconnect = (reason) => {
-      setConnectionStatus('disconnected');
-      if (reason === 'io server disconnect') {
-        // the disconnection was initiated by the server, need to reconnect manually
-        socket.connect();
-      }
-      addToast('Connection lost. Attempting to reconnect...', 'warning');
-    };
-
-    const onConnectError = () => {
-      setConnectionStatus('error');
-      addToast('Server connection failed.', 'error');
-    };
-
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('connect_error', onConnectError);
-
-    // If socket is already connected when this effect runs, invoke onConnect immediately
-    if (socket.connected) {
-      onConnect();
-    }
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('connect_error', onConnectError);
-    };
-  }, [socket, currentRoom, sessionInfo, addToast]);
-
-  // 3. Room-Specific Messaging & Typing Event Bindings Effect
-  // Re-binds event listeners when active room switches, without disrupting connection.
-  useEffect(() => {
-    if (!socket || connectionStatus !== 'connected') return;
-
-    // Join room immediately when currentRoom changes
-    socket.emit('join', {
-      room: currentRoom,
-      senderSessionId: sessionInfo.sessionId,
-      moniker: sessionInfo.moniker,
-    });
-
-    const onHistory = (data) => {
-      if (data && data.room === currentRoom) {
-        setMessages(data.messages || []);
-      }
-    };
-
-    const onMessage = (message) => {
-      if (message && message.room === currentRoom) {
-        setMessages((prev) => {
-          // De-duplicate incoming messages by checking database IDs
-          const exists = prev.some((m) => m._id && m._id === message._id);
-          if (exists) return prev;
-          return [...prev, message];
-        });
-      }
-    };
-
-    const onRoomCount = (data) => {
-      if (data && data.room === currentRoom) {
-        setOnlineCounts((prev) => ({ ...prev, room: data.count }));
-      }
-    };
-
-    const onGlobalCount = (data) => {
-      if (data) {
-        setOnlineCounts((prev) => ({ ...prev, global: data.count }));
-      }
-    };
-
-    const onTypingStart = (data) => {
-      if (data && data.room === currentRoom) {
-        const { moniker } = data;
-        setTypingUsers((prev) => {
-          if (prev.includes(moniker)) return prev;
-          return [...prev, moniker];
-        });
-
-        // Reset timer if user continues typing
-        if (typingTimeouts.current.has(moniker)) {
-          clearTimeout(typingTimeouts.current.get(moniker));
+    // Pre-flight health check to handle Render server cold start gracefully
+    const checkHealthAndConnect = async () => {
+      setConnectionStatus('waking');
+      try {
+        await apiService.checkHealth();
+        if (isSubscribed) {
+          isHealthCheckedRef.current = true;
+          initSocketConnection();
         }
-
-        const timeout = setTimeout(() => {
-          setTypingUsers((prev) => prev.filter((u) => u !== moniker));
-          typingTimeouts.current.delete(moniker);
-        }, 4000);
-
-        typingTimeouts.current.set(moniker, timeout);
+      } catch (err) {
+        if (isSubscribed) {
+          // Backend waking up / cold starting. Retry health check polling every 3s
+          healthCheckTimerRef.current = setTimeout(checkHealthAndConnect, 3000);
+        }
       }
     };
 
-    const onTypingStop = (data) => {
-      if (data && data.room === currentRoom) {
-        setTypingUsers([]);
-        // Clear all active typing timers
-        typingTimeouts.current.forEach((t) => clearTimeout(t));
-        typingTimeouts.current.clear();
-      }
-    };
-
-    socket.on('history', onHistory);
-    socket.on('message', onMessage);
-    socket.on('room_count_update', onRoomCount);
-    socket.on('global_count_update', onGlobalCount);
-    socket.on('typing:start', onTypingStart);
-    socket.on('typing:stop', onTypingStop);
+    checkHealthAndConnect();
 
     return () => {
-      // Notify the server immediately that typing has stopped for this room
-      socket.emit('typing:stop');
-
-      socket.off('history', onHistory);
-      socket.off('message', onMessage);
-      socket.off('room_count_update', onRoomCount);
-      socket.off('global_count_update', onGlobalCount);
-      socket.off('typing:start', onTypingStart);
-      socket.off('typing:stop', onTypingStop);
-
-      // Clean up typing indicators on room change
-      setTypingUsers([]);
-      typingTimeouts.current.forEach((t) => clearTimeout(t));
-      typingTimeouts.current.clear();
+      isSubscribed = false;
+      if (healthCheckTimerRef.current) {
+        clearTimeout(healthCheckTimerRef.current);
+      }
+      if (socketRef.current) {
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+      clearAllTypingTimeouts();
     };
-  }, [socket, connectionStatus, currentRoom, sessionInfo]);
+  }, [sessionInfo.sessionId, addToast, clearAllTypingTimeouts]);
 
-  // 4. REST API Fallback History Query Effect
-  // If socket connection is offline/disconnected or errors out, fetch history via REST API
+  // 3. Network Presence & Mobile Background Tab Recovery Listeners
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      addToast('Internet connection restored.', 'success');
+
+      // Immediate socket reconnection or health re-check
+      if (socketRef.current) {
+        if (!socketRef.current.connected) {
+          socketRef.current.connect();
+        }
+      } else if (!isHealthCheckedRef.current) {
+        // Retry initial health check if socket hasn't initialized yet
+        apiService.checkHealth().then(() => {
+          isHealthCheckedRef.current = true;
+          if (socketRef.current && !socketRef.current.connected) {
+            socketRef.current.connect();
+          }
+        }).catch(() => {});
+      }
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setConnectionStatus('disconnected');
+      addToast('You are currently offline. Check your network settings.', 'error');
+    };
+
+    // Tab visibility recovery (Mobile lock screen / desktop tab switch)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (socketRef.current) {
+          if (!socketRef.current.connected && navigator.onLine) {
+            setConnectionStatus('reconnecting');
+            socketRef.current.connect();
+          } else if (socketRef.current.connected) {
+            // Guarantee room re-join and count sync when returning to foreground
+            socketRef.current.emit('join', {
+              room: currentRoomRef.current,
+              senderSessionId: sessionInfoRef.current.sessionId,
+              moniker: sessionInfoRef.current.moniker,
+            });
+          }
+        }
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [addToast]);
+
+  // 4. REST API Fallback History Query Effect when socket is disconnected
   useEffect(() => {
     if (connectionStatus === 'connected') return;
 
@@ -266,8 +332,7 @@ export const SocketProvider = ({ children }) => {
           setMessages(res.data || []);
         }
       } catch (err) {
-        console.error('[SocketContext] REST fallback history query failed:', err);
-        addToast('Failed to load history from REST API.', 'error');
+        // Silence noise during cold-start
       }
     };
 
@@ -276,88 +341,124 @@ export const SocketProvider = ({ children }) => {
     return () => {
       isActive = false;
     };
-  }, [currentRoom, connectionStatus, addToast]);
+  }, [currentRoom, connectionStatus]);
 
-  // Method to manual retry reconnection
+  // Manual retry connection handler
   const retryConnection = useCallback(() => {
     if (!navigator.onLine) {
       addToast('Cannot connect: Internet is offline.', 'error');
       return;
     }
     addToast('Retrying server connection...', 'info');
-    if (socket) {
-      socket.connect();
-    }
-  }, [socket, addToast]);
+    setConnectionStatus('connecting');
 
-  // Method to join/switch rooms
+    if (socketRef.current) {
+      socketRef.current.connect();
+    } else {
+      apiService.checkHealth().then(() => {
+        isHealthCheckedRef.current = true;
+        if (socketRef.current) socketRef.current.connect();
+      }).catch(() => {
+        setConnectionStatus('waking');
+      });
+    }
+  }, [addToast]);
+
+  // Join/switch rooms handler
   const joinRoom = useCallback((roomName) => {
     if (!roomName || roomName.trim() === '') return;
     const sanitized = roomName.trim();
+    if (sanitized === currentRoomRef.current) return;
+
     setCurrentRoom(sanitized);
+    currentRoomRef.current = sanitized;
     setMessages([]);
-    setTypingUsers([]);
+    clearAllTypingTimeouts();
+
+    // Notify server of room change over existing socket connection
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('typing:stop');
+      socketRef.current.emit('join', {
+        room: sanitized,
+        senderSessionId: sessionInfoRef.current.sessionId,
+        moniker: sessionInfoRef.current.moniker,
+      });
+    }
+  }, [clearAllTypingTimeouts]);
+
+  // Typing status handlers
+  const sendTypingStart = useCallback(() => {
+    if (socketRef.current && socketRef.current.connected && navigator.onLine) {
+      socketRef.current.emit('typing:start', { moniker: sessionInfoRef.current.moniker });
+    }
   }, []);
 
-  // Method to emit typing status
-  const sendTypingStart = useCallback(() => {
-    if (socket && connectionStatus === 'connected' && navigator.onLine) {
-      socket.emit('typing:start', { moniker: sessionInfo.moniker });
-    }
-  }, [socket, connectionStatus, sessionInfo.moniker]);
-
   const sendTypingStop = useCallback(() => {
-    if (socket && connectionStatus === 'connected') {
-      socket.emit('typing:stop');
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('typing:stop');
     }
-  }, [socket, connectionStatus]);
+  }, []);
 
-  // Method to emit new message
+  // Send message handler
   const sendMessage = useCallback((content) => {
     if (!content || content.trim() === '') return;
-    
-    // Offline protection
+
     if (!navigator.onLine) {
       addToast('Cannot send message: Internet is offline.', 'error');
       return;
     }
 
-    if (connectionStatus !== 'connected') {
-      addToast('Cannot send message: Disconnected from server.', 'error');
-      return;
-    }
-
-    if (socket && connectionStatus === 'connected') {
-      socket.emit('message', {
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('message', {
         content: content.trim(),
-        senderSessionId: sessionInfo.sessionId,
-        moniker: sessionInfo.moniker,
-        room: currentRoom,
+        senderSessionId: sessionInfoRef.current.sessionId,
+        moniker: sessionInfoRef.current.moniker,
+        room: currentRoomRef.current,
       });
+    } else {
+      addToast('Cannot send message: Reconnecting to server...', 'warning');
     }
-  }, [socket, connectionStatus, sessionInfo, currentRoom, addToast]);
+  }, [addToast]);
+
+  // Memoize context value to optimize child re-renders
+  const contextValue = useMemo(() => ({
+    socket,
+    connectionStatus,
+    currentRoom,
+    messages,
+    typingUsers,
+    onlineCounts,
+    sessionInfo,
+    joinRoom,
+    sendMessage,
+    sendTypingStart,
+    sendTypingStop,
+    toasts,
+    removeToast,
+    addToast,
+    isOnline,
+    retryConnection,
+  }), [
+    socket,
+    connectionStatus,
+    currentRoom,
+    messages,
+    typingUsers,
+    onlineCounts,
+    sessionInfo,
+    joinRoom,
+    sendMessage,
+    sendTypingStart,
+    sendTypingStop,
+    toasts,
+    removeToast,
+    addToast,
+    isOnline,
+    retryConnection,
+  ]);
 
   return (
-    <SocketContext.Provider
-      value={{
-        socket,
-        connectionStatus,
-        currentRoom,
-        messages,
-        typingUsers,
-        onlineCounts,
-        sessionInfo,
-        joinRoom,
-        sendMessage,
-        sendTypingStart,
-        sendTypingStop,
-        toasts,
-        removeToast,
-        addToast,
-        isOnline,
-        retryConnection,
-      }}
-    >
+    <SocketContext.Provider value={contextValue}>
       {children}
     </SocketContext.Provider>
   );
@@ -370,5 +471,6 @@ export const useSocket = () => {
   }
   return context;
 };
+
 
 

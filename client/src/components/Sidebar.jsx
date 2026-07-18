@@ -1,21 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, memo } from 'react';
 import { useSocket } from '../context/SocketContext';
 import styles from './Sidebar.module.css';
 
 const DEFAULT_ROOMS = ['general', 'development', 'media', 'research-and-marketing', 'random'];
 const ROOM_NAME_REGEX = /^[a-zA-Z0-9\-_]+$/;
 
-export const Sidebar = ({ onClose }) => {
+export const Sidebar = memo(({ onClose }) => {
   const { currentRoom, joinRoom } = useSocket();
   const [customRoom, setCustomRoom] = useState('');
   const [error, setError] = useState('');
 
-  const handleRoomClick = (roomName) => {
+  const handleRoomClick = useCallback((roomName) => {
     joinRoom(roomName);
-    if (onClose) onClose(); // For mobile sidebars
-  };
+    if (onClose) onClose();
+  }, [joinRoom, onClose]);
 
-  const handleJoinSubmit = (e) => {
+  const handleJoinSubmit = useCallback((e) => {
     e.preventDefault();
     const sanitized = customRoom.trim();
 
@@ -36,7 +36,7 @@ export const Sidebar = ({ onClose }) => {
     joinRoom(sanitized);
     setCustomRoom('');
     if (onClose) onClose();
-  };
+  }, [customRoom, joinRoom, onClose]);
 
   return (
     <aside className={styles.sidebar}>
@@ -89,4 +89,8 @@ export const Sidebar = ({ onClose }) => {
       </nav>
     </aside>
   );
-};
+});
+
+Sidebar.displayName = 'Sidebar';
+export default Sidebar;
+
